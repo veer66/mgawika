@@ -1,26 +1,22 @@
 [package]
-name = "chamkho-pg"
+name = "mgawika"
 version = "0.2.0"
 authors = ["Vee Satayamas <vsatayamas@gmail.com>"]
 edition = "2021"
 build = "build.rs"
 rust-version = "1.77.2"
-description = "A PostgreSQL extension, which its objective is enabling PostgreSQL full-text searching on SE Asian languages"
+description = "A PostgreSQL extension that enables full-text searching on almost every known human language"
 license = "GPLv2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "chamkho_parser"
+name = "mgawika"
 crate-type = ["cdylib"]
-
-[[bin]]
-name = "adding-stmt"
-path = "src/bin.rs"
 
 [dependencies]
 lazy_static = "1.4.0"
-wordcut-engine = { git = "https://github.com/veer66/wordcut-engine" }
+icu = "1.4"
 regex = "1"
 cfg-if = "1.0.0"
 

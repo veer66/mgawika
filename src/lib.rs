@@ -1,18 +1,16 @@
-// extern crate pg_extend;
-// extern crate pg_extern_attr;
 #[macro_use]
 extern crate lazy_static;
 extern crate regex;
-extern crate wordcut_engine;
 
 // use pg_extend::pg_magic;
 // use pg_extend::pg_sys;
 // use pg_extend::pg_sys::{Datum, FunctionCallInfo, Pg_finfo_record};
 use regex::Regex;
 use std::os::raw::{c_char, c_int};
-use std::path::Path;
 use std::sync::atomic::{compiler_fence, Ordering};
-use wordcut_engine::{TextRange, Wordcut};
+use icu::segmenter::WordSegmenter;
+use std::ops::Range;
+
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
@@ -353,29 +351,21 @@ pub fn get_args(
 }
 
 #[no_mangle]
-fn pg_finfo_chamkho_parser_start() -> &'static sys::Pg_finfo_record {
+fn pg_finfo_mgawika_start() -> &'static sys::Pg_finfo_record {
     &sys::Pg_finfo_record { api_version: 1 }
 }
 
 #[no_mangle]
-fn pg_finfo_chamkho_parser_get_token() -> &'static sys::Pg_finfo_record {
+fn pg_finfo_mgawika_get_token() -> &'static sys::Pg_finfo_record {
     &sys::Pg_finfo_record { api_version: 1 }
 }
 
 #[no_mangle]
-fn pg_finfo_chamkho_parser_end() -> &'static sys::Pg_finfo_record {
+fn pg_finfo_mgawika_end() -> &'static sys::Pg_finfo_record {
     &sys::Pg_finfo_record { api_version: 1 }
 }
 
 lazy_static! {
-    static ref WORDCUT: Wordcut = Wordcut::new(
-        wordcut_engine::load_dict(Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/data/dix.txt"
-        )))
-        .unwrap()
-    );
-    static ref THAI_RE: Regex = Regex::new(r"[ก-์]").unwrap();
     static ref SPACE_RE: Regex = Regex::new(r"[\s\t\r\n]").unwrap();
 }
 
@@ -383,13 +373,13 @@ lazy_static! {
 struct ParserCtx {
     text: *const u8,
     text_len: usize,
-    text_ranges: Vec<TextRange>,
+    text_ranges: Vec<Range<usize>>,
     word_idx: usize,
     is_segmented: bool,
 }
 
 #[no_mangle]
-pub fn chamkho_parser_start(func_call_info: sys::FunctionCallInfo) -> sys::Datum {
+pub fn mgawika_start(func_call_info: sys::FunctionCallInfo) -> sys::Datum {
     unsafe {
         let ctx = sys::palloc0(std::mem::size_of::<ParserCtx>()) as *mut ParserCtx;
         #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -402,7 +392,9 @@ pub fn chamkho_parser_start(func_call_info: sys::FunctionCallInfo) -> sys::Datum
 }
 
 #[no_mangle]
-fn chamkho_parser_get_token(func_call_info: sys::FunctionCallInfo) -> sys::Datum {
+fn mgawika_get_token(func_call_info: sys::FunctionCallInfo) -> sys::Datum {
+    let segmenter = WordSegmenter::new_auto();
+
     unsafe {
         let args: Vec<_> = get_args(func_call_info.as_mut().unwrap()).collect();
         let ctx = args[0].unwrap() as *mut ParserCtx;
@@ -410,9 +402,16 @@ fn chamkho_parser_get_token(func_call_info: sys::FunctionCallInfo) -> sys::Datum
         let token_len = args[2].unwrap() as *mut i32;
 
         if !(*ctx).is_segmented {
-            (*ctx).text_ranges = WORDCUT.segment_into_byte_ranges(&String::from_utf8_lossy(
+	    let points: Vec<usize> = segmenter.segment_str(&String::from_utf8_lossy(
                 std::slice::from_raw_parts((*ctx).text, (*ctx).text_len as usize),
-            ));
+            )).collect();
+	    let mut ranges: Vec<_> = vec![];
+	    let mut s = 0;
+	    for p in points {
+		ranges.push(s..p);
+		s = p;
+	    }
+            (*ctx).text_ranges = ranges;
             (*ctx).is_segmented = true;
             (*ctx).word_idx = 0;
         }
@@ -423,15 +422,13 @@ fn chamkho_parser_get_token(func_call_info: sys::FunctionCallInfo) -> sys::Datum
             0
         } else {
             let r = &((*ctx).text_ranges[(*ctx).word_idx]);
-            let len = (r.e - r.s) as i32;
-            let buf = (*ctx).text.add(r.s);
-            *token_len = len;
+            let len = r.end - r.start;
+            let buf = (*ctx).text.add(r.start);
+            *token_len = len as i32;
             *token = buf;
             (*ctx).word_idx += 1;
             let w = &String::from_utf8_lossy(std::slice::from_raw_parts(buf, len as usize));
-            (if THAI_RE.find(w).is_some() {
-                2
-            } else if SPACE_RE.is_match(w) {
+            (if SPACE_RE.is_match(w) {
                 12
             } else {
                 2
@@ -441,7 +438,7 @@ fn chamkho_parser_get_token(func_call_info: sys::FunctionCallInfo) -> sys::Datum
 }
 
 #[no_mangle]
-fn chamkho_parser_end(func_call_info: sys::FunctionCallInfo) -> sys::Datum {
+fn mgawika_end(func_call_info: sys::FunctionCallInfo) -> sys::Datum {
     unsafe {
         let args: Vec<_> = get_args(func_call_info.as_mut().unwrap()).collect();
         let ctx = args[0].unwrap() as *mut ParserCtx;

@@ -1,0 +1,4 @@
+comment = 'mgawika for full text search'
+default_version = '1.0'
+module_pathname = '$libdir/mgawika'
+relocatable = true
